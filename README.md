@@ -112,3 +112,9 @@ that directory's whole lifecycle (creation, permissions, and removal when the
 instance is disabled) is systemd's job via `StateDirectory=`. Running
 `config-watch run` manually outside systemd needs `--state-dir`/
 `STATE_DIRECTORY` pointed at a directory you manage yourself.
+
+`CONFIG_WATCH_PATH` may itself be a symlink (or contain one at the point you
+watch it) — the path is resolved before hashing, so an atomic update done by
+re-pointing a symlink (a swapped `current -> release-N` convention, a
+Kubernetes-style ConfigMap mount, etc.) is detected the same as an in-place
+edit.

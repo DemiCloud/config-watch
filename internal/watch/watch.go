@@ -135,9 +135,22 @@ func Run(cfg Config) error {
 // load (e.g. "haproxy -f <dir>") has no extension convention of its own,
 // and a filtered hash risks silently missing a file the consumer actually
 // loads.
+//
+// path itself is resolved through symlinks before walking: shared/network
+// filesystems commonly publish an atomic update by re-pointing a top-level
+// symlink (e.g. a "current" symlink swapped to a new release directory, or
+// Kubernetes' ConfigMap "..data" convention) rather than editing content in
+// place, and an unresolved symlink root isn't a directory or a regular file
+// by fs.DirEntry's reckoning — WalkDir would silently visit nothing beneath
+// it.
 func hashPath(path string) (string, error) {
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return "", err
+	}
+
 	var paths []string
-	err := filepath.WalkDir(path, func(p string, d fs.DirEntry, walkErr error) error {
+	err = filepath.WalkDir(resolved, func(p string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}

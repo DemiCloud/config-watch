@@ -228,3 +228,48 @@ func TestHashPathEmptyDir(t *testing.T) {
 		t.Fatal("expected error for a directory with no regular files")
 	}
 }
+
+func TestHashPathFollowsSymlinkRoot(t *testing.T) {
+	dir := t.TempDir()
+	real := filepath.Join(dir, "release-1")
+	if err := os.Mkdir(real, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(real, "app.conf"), []byte("v1"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	current := filepath.Join(dir, "current")
+	if err := os.Symlink(real, current); err != nil {
+		t.Fatal(err)
+	}
+
+	hash1, err := hashPath(current)
+	if err != nil {
+		t.Fatalf("hashing symlinked directory: %v", err)
+	}
+
+	// Atomic update: point the symlink at a new release rather than
+	// editing content in place.
+	next := filepath.Join(dir, "release-2")
+	if err := os.Mkdir(next, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(next, "app.conf"), []byte("v2"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(current); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(next, current); err != nil {
+		t.Fatal(err)
+	}
+
+	hash2, err := hashPath(current)
+	if err != nil {
+		t.Fatalf("hashing after symlink swap: %v", err)
+	}
+	if hash1 == hash2 {
+		t.Fatal("expected hash to change after swapping the watched symlink to new content")
+	}
+}
