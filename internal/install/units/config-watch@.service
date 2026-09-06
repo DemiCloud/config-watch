@@ -6,4 +6,4 @@ OnFailure=config-watch-failure@%i.service
 Type=oneshot
 EnvironmentFile={{CONFIG_DIR}}/%i.env
 StateDirectory=config-watch/%i
-ExecStart={{BIN_PATH}} run
+ExecStart="{{BIN_PATH}}" run
