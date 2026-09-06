@@ -124,7 +124,7 @@ Usage:
 Subcommands:
   run        Run one check-and-reload cycle (invoked by the systemd service)
   install    Install the systemd templates and an example EnvironmentFile
-  version    Show version information
+  version    Show version information (aliases: --version, -V)
   help       Show help for a subcommand
 
 Run 'config-watch help <subcommand>' for subcommand usage.
@@ -189,6 +189,8 @@ Prints version, commit, build date, and toolchain information.
 
 Usage:
   config-watch version
+  config-watch --version
+  config-watch -V
 `)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown subcommand %q\n\n", sub)
