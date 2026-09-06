@@ -6,4 +6,10 @@ OnFailure=config-watch-failure@%i.service
 Type=oneshot
 EnvironmentFile={{CONFIG_DIR}}/%i.env
 StateDirectory=config-watch/%i
+# Matches systemd's own DefaultTimeoutStartSec, made explicit here so a slow
+# CONFIG_WATCH_CHECK_CMD/CONFIG_WATCH_RELOAD_CMD isn't silently killed by a
+# distro's DefaultTimeoutStartSec= override elsewhere. Raise via a drop-in
+# (systemctl edit config-watch@<name>.service) if a check/reload command
+# legitimately needs longer.
+TimeoutStartSec=90s
 ExecStart="{{BIN_PATH}}" run
