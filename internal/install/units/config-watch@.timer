@@ -5,6 +5,7 @@ Description=Periodic trigger for config-watch instance: %i
 OnBootSec=15s
 OnUnitActiveSec=15s
 AccuracySec=1s
+RandomizedDelaySec=5s
 
 [Install]
 WantedBy=timers.target
