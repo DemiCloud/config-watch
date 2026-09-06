@@ -1,0 +1,9 @@
+[Unit]
+Description=config-watch instance: %i
+OnFailure=config-watch-failure@%i.service
+
+[Service]
+Type=oneshot
+EnvironmentFile={{CONFIG_DIR}}/%i.env
+StateDirectory=config-watch/%i
+ExecStart={{BIN_PATH}} run

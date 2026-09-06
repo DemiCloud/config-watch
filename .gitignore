@@ -1,0 +1,28 @@
+# Build artifacts
+/build/
+/config-watch
+
+# Release artifacts
+/dist/
+
+# Go binaries (cross-platform)
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binaries
+*.test
+
+# Coverage output
+*.out
+
+# Go workspace files
+go.work
+go.work.sum
+
+# Editor/OS junk
+*.swp
+*.swo
+.DS_Store

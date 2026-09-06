@@ -1,0 +1,6 @@
+[Unit]
+Description=Log an escalation marker for a failed config-watch@%i run
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/logger -t config-watch -p daemon.err "config-watch@%i failed — see: journalctl -u config-watch@%i.service"
