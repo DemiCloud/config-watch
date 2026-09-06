@@ -118,3 +118,7 @@ watch it) — the path is resolved before hashing, so an atomic update done by
 re-pointing a symlink (a swapped `current -> release-N` convention, a
 Kubernetes-style ConfigMap mount, etc.) is detected the same as an in-place
 edit.
+
+## License
+
+[MIT](LICENSE)
