@@ -22,6 +22,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strings"
 )
 
 // Environment variables read by Run. STATE_DIRECTORY is populated
@@ -66,19 +67,19 @@ func LoadConfig(flags Config) (Config, error) {
 
 	var missing []string
 	if cfg.WatchPath == "" {
-		missing = append(missing, "--path (or "+EnvWatchPath+")")
+		missing = append(missing, "--path")
 	}
 	if cfg.StateDir == "" {
-		missing = append(missing, "--state-dir (or "+EnvStateDir+", set automatically by systemd via StateDirectory=)")
+		missing = append(missing, "--state-dir")
 	}
 	if cfg.CheckCmd == "" {
-		missing = append(missing, "--check-cmd (or "+EnvCheckCmd+")")
+		missing = append(missing, "--check-cmd")
 	}
 	if cfg.ReloadCmd == "" {
-		missing = append(missing, "--reload-cmd (or "+EnvReloadCmd+")")
+		missing = append(missing, "--reload-cmd")
 	}
 	if len(missing) > 0 {
-		return Config{}, fmt.Errorf("missing required settings: %v", missing)
+		return Config{}, fmt.Errorf("missing required settings: %s (see 'config-watch help run' for flags/env vars)", strings.Join(missing, ", "))
 	}
 
 	return cfg, nil
