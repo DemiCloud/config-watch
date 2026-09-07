@@ -71,14 +71,18 @@ func Run(cfg Config) error {
 	}
 
 	if current == stored {
+		fmt.Println("run: no change, doing nothing")
 		return nil
 	}
 
 	if stored == "" {
 		// First run: adopt current state without reloading — whatever
 		// consumes this path already started against it.
+		fmt.Println("run: no previous state, adopting current hash without reloading")
 		return writeState(stateFile, current)
 	}
+
+	fmt.Println("run: change detected, reloading")
 
 	if err := runShell(cfg.CheckCmd); err != nil {
 		return fmt.Errorf("check command failed, not reloading (hash %s -> %s): %w", stored, current, err)
@@ -87,6 +91,8 @@ func Run(cfg Config) error {
 	if err := runShell(cfg.ReloadCmd); err != nil {
 		return fmt.Errorf("reload command failed: %w", err)
 	}
+
+	fmt.Println("run: reload succeeded")
 
 	return writeState(stateFile, current)
 }
