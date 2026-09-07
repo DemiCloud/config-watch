@@ -148,92 +148,52 @@ Usage:
   config-watch <subcommand> [flags]
 
 Subcommands:
-  run        Run one check-and-reload cycle (invoked by the systemd service)
-  install    Install the systemd templates and enable a timer instance
+  run        Run one check-and-reload cycle
+  install    Install systemd templates and enable a timer instance
   uninstall  Disable a timer instance and remove the template unit files
-  version    Show version information (aliases: --version, -V)
+  version    Show version information
   help       Show help for a subcommand
-
-Run 'config-watch help <subcommand>' for subcommand usage.
 `)
 }
 
 func usageFor(sub string) {
 	switch sub {
 	case "run":
-		fmt.Print(`config-watch run
-
-Hashes the watched file or directory named by --config's "path" field. If
-the hash has changed since the last run, runs check_cmd; if that succeeds,
-runs reload_cmd and records the new hash.
-
-Passing --config with a path other than the installed
-<config-dir>/<instance>.toml lets a watch be exercised manually, with
---state-dir pointed at a scratch directory, without a systemd instance.
+		fmt.Print(`config-watch run — check the watched path once and reload on change
 
 Usage:
   config-watch run --config <path> [flags]
 
 Flags:
   -c, --config string      Path to the instance's TOML config file (required)
-      --state-dir string   Where the content hash is stored (env: STATE_DIRECTORY,
-                            set automatically by systemd via StateDirectory=)
+      --state-dir string   Directory storing the content hash (env: STATE_DIRECTORY)
   -h, --help                Show this help
 `)
 
 	case "install":
-		fmt.Print(`config-watch install
-
-Writes the config-watch@.service, config-watch@.timer, and
-config-watch-failure@.service systemd template units (only if their
-rendered content changed), reloads systemd, and enables+starts the named
-instance's timer. Creates <config-dir>/<instance>.toml with a sample
-config if it doesn't already exist.
-
-This does NOT copy or move the config-watch binary anywhere. Put the
-binary wherever you want it to live first (/usr/local/bin, /usr/local/sbin,
-...), then run "config-watch install <instance>" from that location — the
-installed units' ExecStart= is pointed at wherever this binary is
-currently running from.
+		fmt.Print(`config-watch install — install systemd units and enable a timer instance
 
 Usage:
   config-watch install <instance> [flags]
 
-Arguments:
-  <instance>     Instance name — enables config-watch@<instance>.timer
-
 Flags:
-      --unit-dir     Directory to install systemd unit files into (default: ` + install.DefaultUnitDir + `)
-      --config-dir   Directory for per-instance TOML config files (default: ` + install.DefaultConfigDir + `)
-  -h, --help         Show this help
-
-After installing, edit <config-dir>/<instance>.toml to configure the
-watch, then the timer will pick it up on its next tick.
+      --unit-dir string     Directory to install systemd unit files into (default ` + install.DefaultUnitDir + `)
+      --config-dir string   Directory for per-instance TOML config files (default ` + install.DefaultConfigDir + `)
+  -h, --help                 Show this help
 `)
 	case "uninstall":
-		fmt.Print(`config-watch uninstall
-
-Disables and stops the named timer instance, then removes the shared
-template unit files and reloads the systemd daemon.
-
-The instance's config file (<config-dir>/<instance>.toml) and state
-directory are not removed.
+		fmt.Print(`config-watch uninstall — disable a timer instance and remove unit files
 
 Usage:
   config-watch uninstall <instance> [flags]
 
-Arguments:
-  <instance>     Instance name — disables config-watch@<instance>.timer
-
 Flags:
-      --unit-dir     Directory the systemd unit files were installed into (default: ` + install.DefaultUnitDir + `)
-      --config-dir   Directory the per-instance TOML config files live in (default: ` + install.DefaultConfigDir + `)
-  -h, --help         Show this help
+      --unit-dir string     Directory the systemd unit files were installed into (default ` + install.DefaultUnitDir + `)
+      --config-dir string   Directory the per-instance TOML config files live in (default ` + install.DefaultConfigDir + `)
+  -h, --help                 Show this help
 `)
 	case "version":
-		fmt.Print(`config-watch version
-
-Prints version, commit, build date, and toolchain information.
+		fmt.Print(`config-watch version — show version, commit, build date, and toolchain info
 
 Usage:
   config-watch version
