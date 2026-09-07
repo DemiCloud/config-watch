@@ -17,10 +17,16 @@ reload command.
 - Produces a **single static binary** from `cmd/config-watch/`.
 - Designed to run as a systemd **oneshot** service triggered by a **timer**, one
   instance per watched target (`config-watch@<name>.service` /
-  `config-watch@<name>.timer`), configured entirely through an `EnvironmentFile`.
+  `config-watch@<name>.timer`), configured through its own TOML file at
+  `<config-dir>/<name>.toml`, passed to `ExecStart=` as `run --config ...%i.toml`
+  — the instance name flows in from systemd's `%i` as a CLI argument, not an
+  `EnvironmentFile`.
 - This is a polling design, not inotify-based — built for targets on shared/network
   filesystems (e.g. CephFS) where a change made by another client doesn't produce a
   local inotify event, so hashing content on a timer is the reliable option.
+- Follows the same install/config/version pattern as `anycast-sentinel` (see that
+  repo's AGENTS.md) — that pattern is the shared standard across demicloud's Go
+  CLIs; if you're adding a fourth tool of this shape, start from there.
 
 ---
 
@@ -29,34 +35,45 @@ reload command.
 ```text
 cmd/
   config-watch/
-    main.go         ← CLI dispatch (run/install/version), pflag parsing for "install"
+    main.go         ← CLI dispatch (run/install/uninstall/version), pflag parsing
 internal/
+  config/
+    config.go       ← Config struct (path/check_cmd/reload_cmd), toml tags
+    load.go         ← Load(path): decode + DisallowUnknownFields + required-field checks
+    load_test.go
+  version/
+    version.go      ← build-time metadata vars + Print(), set via -ldflags
   watch/
     watch.go        ← "run" subcommand: hash, compare, check, reload
     watch_test.go
   install/
-    install.go      ← "install" subcommand: embeds + writes units, points them at
-                       the binary's own resolved path — never touches the binary
+    install.go      ← "install"/"uninstall" subcommands: renders + writes units
+                       (only if changed), points ExecStart= at the binary's own
+                       resolved path — never touches the binary itself
     units/
-      config-watch@.service          ← {{BIN_PATH}} / {{CONFIG_DIR}} placeholders
+      config-watch@.service          ← {{.BinPath}} / {{.ConfigDir}} template fields
       config-watch@.timer
       config-watch-failure@.service  ← OnFailure= target, logs an escalation line
-      example.env                    ← {{CONFIG_DIR}} placeholder in its header comment
 ```
 
 Units are embedded in the binary via `go:embed` (`internal/install/install.go`) — there
-are no unit files shipped or read from disk at install time. The `{{BIN_PATH}}` and
-`{{CONFIG_DIR}}` placeholders in the embedded templates are substituted with the actual
-values (resolved binary path, and the `--config-dir` value or its default) by `render()`
-in `internal/install/install.go` before the files are written out. If you add a new
-embedded template that needs to reference an install path, add the placeholder there and
-extend `render()` — do not hardcode `/etc/config-watch` or an assumed binary path into a
-template file.
+are no unit files shipped or read from disk at install time. They are rendered with
+`text/template` (not raw string substitution) and written via `writeTemplateIfChanged`,
+which skips the write (and the `install`-time log line) when the rendered content
+matches what's already on disk — re-running `install <instance>` after an unrelated
+config edit doesn't perturb unit files or force an unnecessary daemon-reload. If you add
+a new embedded template that needs to reference an install path, add the field to
+`tmplData` and reference it as `{{.FieldName}}` — do not hardcode `/etc/config-watch` or
+an assumed binary path into a template file.
+
+There is no per-instance example file anymore (no more `example.env`) — `install`
+writes `<config-dir>/<instance>.toml` directly from `sampleConfig()` in
+`internal/install/install.go`, and only when that file doesn't already exist.
 
 **`install` does not manage the binary.** There is deliberately no `--bin-dir` flag and
 no code path that copies, moves, or writes the config-watch binary anywhere. The expected
 workflow is: the operator puts the binary wherever they want it first, then runs
-`config-watch install` *from that location* — `resolveBinaryPath()` in `install.go` uses
+`config-watch install <instance>` *from that location* — `resolveBinaryPath()` in `install.go` uses
 `os.Executable()` + `filepath.EvalSymlinks` to find where it's actually running from, and
 that resolved path is what gets baked into `ExecStart=`. Do not reintroduce a
 binary-copying step; if the operator moves the binary, the fix is "re-run install", not
@@ -146,30 +163,35 @@ Use conventional-commits style:
 ### Go
 
 - **Always `CGO_ENABLED=0`.** Linux-only tool, no C libraries needed.
-- Version metadata is injected at link time via `-ldflags`. The variables
-  (`version`, `commit`, `date`, `builtBy`) live in `cmd/config-watch/main.go`;
-  `make build` sets only `version` (dev builds), `make release` sets all four.
+- Version metadata is injected at link time via `-ldflags` targeting
+  `internal/version`'s package-level vars (`Version`, `Commit`, `BuildDate`,
+  `BuiltBy` in `internal/version/version.go`) — see `LDFLAGS`/`RELEASE_LDFLAGS`
+  in the `Makefile`. `make build` sets only `Version` (dev builds), `make release`
+  sets all four. `version.Print()` is the only thing that reads them.
 - CLI flag parsing uses `github.com/spf13/pflag`, scoped per-subcommand with its own
-  `flag.NewFlagSet` (see `runCmd`/`installCmd` in `main.go`) — there is no top-level
-  flag set, since `run`/`install`/`version` take entirely different arguments.
-  `usage()`/`usageFor(sub)` in `main.go` hold the actual help text; each subcommand's
-  `FlagSet.Usage` is wired to `usageFor` so `-h`/`--help` (which pflag intercepts
-  automatically, even for flags it doesn't define) prints the right subcommand help.
-  When adding a flag to a subcommand, update both the `FlagSet` and its `usageFor`
-  case — they aren't generated from each other.
-- `internal/watch` and `internal/install` do not import each other. `watch` knows
-  nothing about install paths or systemd units; `install` knows nothing about hashing
-  or the check/reload cycle.
+  `flag.NewFlagSet` (see `runCmd`/`installCmd`/`uninstallCmd` in `main.go`) — there is
+  no top-level flag set, since `run`/`install`/`uninstall`/`version` take entirely
+  different arguments. `usage()`/`usageFor(sub)` in `main.go` hold the actual help
+  text; each subcommand's `FlagSet.Usage` is wired to `usageFor` so `-h`/`--help`
+  (which pflag intercepts automatically, even for flags it doesn't define) prints the
+  right subcommand help. When adding a flag to a subcommand, update both the
+  `FlagSet` and its `usageFor` case — they aren't generated from each other.
+- `internal/watch`, `internal/config`, and `internal/install` do not import each
+  other. `watch` knows nothing about install paths, systemd units, or TOML; `config`
+  only knows how to decode and validate one instance's file; `install` knows nothing
+  about hashing or the check/reload cycle. `main.go` is the only place that wires
+  `config.Load`'s output into a `watch.Config`.
 - `watch.Config` is passed by value into `watch.Run` so the check/reload/hash/state
   logic is testable without touching the environment or a real systemd
-  `StateDirectory`. `watch.LoadConfig` is the only place that reads `os.Getenv`.
-- `watch.LoadConfig(flags Config)` merges CLI flags over environment variables
-  (flag wins when both are set, per-field) — this is what lets `config-watch run`
-  be driven by a systemd `EnvironmentFile`, plain flags, or a mix of both. A new
-  setting needs a field on `Config`, an `Env*` constant, a merge line in
-  `LoadConfig`, a "missing" message entry, a flag in `runCmd` (`main.go`), and a
-  line in the `run` case of `usageFor` — none of these are generated from the
-  others, so add all of them together.
+  `StateDirectory`. `watch.ResolveStateDir` is the only place in `internal/watch`
+  that reads `os.Getenv` — `WatchPath`/`CheckCmd`/`ReloadCmd` come from
+  `config.Load`, not the environment or flags, so there's no merge logic for them.
+- `config.Load(path)` uses `go-toml/v2`'s `DisallowUnknownFields()` — a typo'd key in
+  an instance's TOML file is a load error, not a silently-ignored field. A new
+  setting needs a field on `config.Config` (with a `toml` tag), a required-field
+  check in `Load`, a line in `sampleConfig()` (`internal/install/install.go`), and a
+  place to read it off `*config.Config` in `runCmd` (`main.go`) — none of these are
+  generated from the others, so add all of them together.
 
 ### Testing
 
@@ -177,6 +199,10 @@ Use conventional-commits style:
   `sh -c` commands (`true`/`false`/`touch <marker>`) rather than mocking the shell —
   the whole point of this tool is shelling out to check/reload commands, so a test that
   mocks that away wouldn't catch a regression there.
+- `internal/config`'s tests are table-driven over raw TOML strings written to a temp
+  file (see `writeTemp` in `load_test.go`), covering the valid case, each missing
+  field, and unknown-field rejection — mirrors `anycast-sentinel/internal/config`'s
+  test shape.
 - Any new install-path logic in `internal/install` should stay testable by taking an
   `Options` value rather than reading flags or the environment directly, mirroring how
   `watch.Run` takes a `Config`.
@@ -184,17 +210,18 @@ Use conventional-commits style:
 ### Security
 
 This binary is invoked by a systemd `oneshot` service (typically to run as root or
-under whatever user runs the target service) and both `CONFIG_WATCH_CHECK_CMD` and
-`CONFIG_WATCH_RELOAD_CMD` are shelled out via `sh -c`. Apply extra scrutiny to any
-change that:
+under whatever user runs the target service) and both `check_cmd` and `reload_cmd`
+(from the instance's TOML config) are shelled out via `sh -c`. Apply extra scrutiny to
+any change that:
 
 - Adds new places where a command string is passed to `exec.Command`/`sh -c`.
-- Changes what populates `EnvironmentFile` values written by `install` — these become
+- Changes what populates the `check_cmd`/`reload_cmd` values written by
+  `install`'s `sampleConfig()`, or how `config.Load` validates them — these become
   arbitrary shell commands run on every timer tick.
 - Touches `internal/install`'s file/directory writes (`os.WriteFile`, `os.MkdirAll`) —
-  these run with whatever privilege level `config-watch install` is invoked at
-  (normally root, via `sudo`).
+  these run with whatever privilege level `config-watch install`/`uninstall` is
+  invoked at (normally root, via `sudo`).
 
-`CONFIG_WATCH_CHECK_CMD` and `CONFIG_WATCH_RELOAD_CMD` are operator-supplied
-configuration, not untrusted external input — there is no sanitization step for them by
-design, the same way a systemd `ExecStart=` line isn't sanitized.
+`check_cmd` and `reload_cmd` are operator-supplied configuration, not untrusted
+external input — there is no sanitization step for them by design, the same way a
+systemd `ExecStart=` line isn't sanitized.

@@ -4,11 +4,11 @@
 // command.
 //
 // It is normally invoked once per systemd template unit instance
-// (config-watch@<name>.service), with every setting supplied through an
-// EnvironmentFile — see internal/install and units/example.env. Every
-// setting can also be given as a command-line flag instead (or as well —
-// a flag wins over the environment when both are set), so a watch can be
-// exercised manually without a systemd instance.
+// (config-watch@<name>.service), with WatchPath/CheckCmd/ReloadCmd loaded
+// from that instance's TOML config file (see internal/config) and StateDir
+// resolved via ResolveStateDir. Passing a config path other than the
+// installed one lets a watch be exercised manually without a systemd
+// instance.
 package watch
 
 import (
@@ -22,25 +22,19 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
-	"strings"
 )
 
-// Environment variables read by Run. STATE_DIRECTORY is populated
-// automatically by systemd when the unit sets StateDirectory=; it is not
-// something an operator sets by hand in the instance .env file.
-const (
-	EnvWatchPath = "CONFIG_WATCH_PATH"
-	EnvCheckCmd  = "CONFIG_WATCH_CHECK_CMD"
-	EnvReloadCmd = "CONFIG_WATCH_RELOAD_CMD"
-	EnvStateDir  = "STATE_DIRECTORY"
-)
+// EnvStateDir is populated automatically by systemd when the unit sets
+// StateDirectory=; it is not something an operator sets by hand in the
+// instance's TOML config.
+const EnvStateDir = "STATE_DIRECTORY"
 
 const stateFileName = "content.sha256"
 
 // Config holds everything one watch instance needs. It is normally built
-// by LoadConfig from the environment, but Run takes it directly so the
-// core logic can be tested without an env or a real systemd state
-// directory.
+// from a TOML config file (internal/config) plus a resolved state
+// directory, but Run takes it directly so the core logic can be tested
+// without a real systemd state directory.
 type Config struct {
 	WatchPath string // file or directory to hash
 	StateDir  string // where content.sha256 is kept
@@ -48,48 +42,18 @@ type Config struct {
 	ReloadCmd string // run only if CheckCmd succeeds
 }
 
-// LoadConfig resolves a Config from flags and the environment: any
-// non-empty field in flags is used as-is, and every field left blank falls
-// back to the corresponding environment variable. Passing a zero Config
-// resolves purely from the environment — the shape a systemd instance's
-// EnvironmentFile supplies.
-//
-// It returns an error that names every setting still missing after that
-// merge, mentioning both the flag and the environment variable that can
-// supply it.
-func LoadConfig(flags Config) (Config, error) {
-	cfg := Config{
-		WatchPath: firstNonEmpty(flags.WatchPath, os.Getenv(EnvWatchPath)),
-		StateDir:  firstNonEmpty(flags.StateDir, os.Getenv(EnvStateDir)),
-		CheckCmd:  firstNonEmpty(flags.CheckCmd, os.Getenv(EnvCheckCmd)),
-		ReloadCmd: firstNonEmpty(flags.ReloadCmd, os.Getenv(EnvReloadCmd)),
+// ResolveStateDir resolves the state directory to use: flag wins if
+// non-empty, otherwise it falls back to STATE_DIRECTORY (set automatically
+// by systemd via a unit's StateDirectory=). Returns an error naming both
+// ways to supply it if neither is set.
+func ResolveStateDir(flag string) (string, error) {
+	if flag != "" {
+		return flag, nil
 	}
-
-	var missing []string
-	if cfg.WatchPath == "" {
-		missing = append(missing, "--path")
+	if env := os.Getenv(EnvStateDir); env != "" {
+		return env, nil
 	}
-	if cfg.StateDir == "" {
-		missing = append(missing, "--state-dir")
-	}
-	if cfg.CheckCmd == "" {
-		missing = append(missing, "--check-cmd")
-	}
-	if cfg.ReloadCmd == "" {
-		missing = append(missing, "--reload-cmd")
-	}
-	if len(missing) > 0 {
-		return Config{}, fmt.Errorf("missing required settings: %s (see 'config-watch help run' for flags/env vars)", strings.Join(missing, ", "))
-	}
-
-	return cfg, nil
-}
-
-func firstNonEmpty(a, b string) string {
-	if a != "" {
-		return a
-	}
-	return b
+	return "", fmt.Errorf("missing required setting: --state-dir (or systemd's StateDirectory=, via %s)", EnvStateDir)
 }
 
 // Run performs one check-and-reload cycle for cfg.

@@ -6,68 +6,36 @@ import (
 	"testing"
 )
 
-func TestLoadConfigMissing(t *testing.T) {
-	for _, k := range []string{EnvWatchPath, EnvCheckCmd, EnvReloadCmd, EnvStateDir} {
-		t.Setenv(k, "")
-	}
+func TestResolveStateDirMissing(t *testing.T) {
+	t.Setenv(EnvStateDir, "")
 
-	_, err := LoadConfig(Config{})
+	_, err := ResolveStateDir("")
 	if err == nil {
-		t.Fatal("expected error for missing settings, got nil")
+		t.Fatal("expected error for missing state dir, got nil")
 	}
 }
 
-func TestLoadConfigFromEnv(t *testing.T) {
-	t.Setenv(EnvWatchPath, "/tmp/watched")
-	t.Setenv(EnvCheckCmd, "true")
-	t.Setenv(EnvReloadCmd, "true")
+func TestResolveStateDirFromEnv(t *testing.T) {
 	t.Setenv(EnvStateDir, "/tmp/state")
 
-	cfg, err := LoadConfig(Config{})
+	dir, err := ResolveStateDir("")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	want := Config{WatchPath: "/tmp/watched", StateDir: "/tmp/state", CheckCmd: "true", ReloadCmd: "true"}
-	if cfg != want {
-		t.Fatalf("got %+v, want %+v", cfg, want)
+	if dir != "/tmp/state" {
+		t.Fatalf("got %q, want %q", dir, "/tmp/state")
 	}
 }
 
-func TestLoadConfigFromFlags(t *testing.T) {
-	for _, k := range []string{EnvWatchPath, EnvCheckCmd, EnvReloadCmd, EnvStateDir} {
-		t.Setenv(k, "")
-	}
-
-	cfg, err := LoadConfig(Config{
-		WatchPath: "/tmp/watched",
-		StateDir:  "/tmp/state",
-		CheckCmd:  "true",
-		ReloadCmd: "true",
-	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	want := Config{WatchPath: "/tmp/watched", StateDir: "/tmp/state", CheckCmd: "true", ReloadCmd: "true"}
-	if cfg != want {
-		t.Fatalf("got %+v, want %+v", cfg, want)
-	}
-}
-
-func TestLoadConfigFlagWinsOverEnv(t *testing.T) {
-	t.Setenv(EnvWatchPath, "/env/watched")
-	t.Setenv(EnvCheckCmd, "/env/check")
-	t.Setenv(EnvReloadCmd, "/env/reload")
+func TestResolveStateDirFlagWinsOverEnv(t *testing.T) {
 	t.Setenv(EnvStateDir, "/env/state")
 
-	// Only WatchPath is overridden by a flag; the rest must still fall
-	// back to the environment.
-	cfg, err := LoadConfig(Config{WatchPath: "/flag/watched"})
+	dir, err := ResolveStateDir("/flag/state")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	want := Config{WatchPath: "/flag/watched", StateDir: "/env/state", CheckCmd: "/env/check", ReloadCmd: "/env/reload"}
-	if cfg != want {
-		t.Fatalf("got %+v, want %+v", cfg, want)
+	if dir != "/flag/state" {
+		t.Fatalf("got %q, want %q", dir, "/flag/state")
 	}
 }
 

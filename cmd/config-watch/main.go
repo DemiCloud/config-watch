@@ -3,29 +3,19 @@
 // that succeeds — runs a configurable reload command.
 //
 // It is designed to run as one instance per systemd template unit
-// (config-watch@<name>.service), with each instance configured entirely
-// through an EnvironmentFile — see "config-watch install" and
-// internal/install/units/example.env.
+// (config-watch@<name>.service), with each instance configured through its
+// own TOML file — see "config-watch install" and internal/config.
 package main
 
 import (
 	"fmt"
 	"os"
-	"runtime"
 
+	"github.com/demicloud/config-watch/internal/config"
 	"github.com/demicloud/config-watch/internal/install"
+	"github.com/demicloud/config-watch/internal/version"
 	"github.com/demicloud/config-watch/internal/watch"
 	flag "github.com/spf13/pflag"
-)
-
-// Build-time metadata, set via:
-//
-//	go build -ldflags "-X main.version=vX.Y.Z -X main.commit=... -X main.date=... -X main.builtBy=..."
-var (
-	version = "dev"
-	commit  = "none"
-	date    = "unknown"
-	builtBy = "unknown"
 )
 
 func main() {
@@ -39,8 +29,10 @@ func main() {
 		runCmd(os.Args[2:])
 	case "install":
 		installCmd(os.Args[2:])
+	case "uninstall":
+		uninstallCmd(os.Args[2:])
 	case "version", "--version", "-V":
-		printVersion()
+		version.Print()
 	case "help", "--help", "-h":
 		if len(os.Args) > 2 {
 			usageFor(os.Args[2])
@@ -57,9 +49,7 @@ func main() {
 func runCmd(args []string) {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	fs.Usage = func() { usageFor("run") }
-	path := fs.String("path", "", "file or directory to watch (env: "+watch.EnvWatchPath+")")
-	checkCmd := fs.String("check-cmd", "", "command that must exit 0 before reloading (env: "+watch.EnvCheckCmd+")")
-	reloadCmd := fs.String("reload-cmd", "", "command to run after a successful check (env: "+watch.EnvReloadCmd+")")
+	flagConfig := fs.StringP("config", "c", "", "path to the instance's TOML config file")
 	stateDir := fs.String("state-dir", "", "directory to store the content hash in (env: "+watch.EnvStateDir+")")
 	if err := fs.Parse(args); err != nil {
 		if err == flag.ErrHelp {
@@ -68,18 +58,30 @@ func runCmd(args []string) {
 		os.Exit(1)
 	}
 
-	cfg, err := watch.LoadConfig(watch.Config{
-		WatchPath: *path,
-		CheckCmd:  *checkCmd,
-		ReloadCmd: *reloadCmd,
-		StateDir:  *stateDir,
-	})
+	if *flagConfig == "" {
+		fmt.Fprintf(os.Stderr, "run: --config is required\n\n")
+		usageFor("run")
+		os.Exit(1)
+	}
+
+	cfg, err := config.Load(*flagConfig)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "config-watch: config error:", err)
+		os.Exit(1)
+	}
+
+	resolvedStateDir, err := watch.ResolveStateDir(*stateDir)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "config-watch:", err)
 		os.Exit(1)
 	}
 
-	if err := watch.Run(cfg); err != nil {
+	if err := watch.Run(watch.Config{
+		WatchPath: cfg.Path,
+		CheckCmd:  cfg.CheckCmd,
+		ReloadCmd: cfg.ReloadCmd,
+		StateDir:  resolvedStateDir,
+	}); err != nil {
 		fmt.Fprintln(os.Stderr, "config-watch:", err)
 		os.Exit(1)
 	}
@@ -89,7 +91,7 @@ func installCmd(args []string) {
 	fs := flag.NewFlagSet("install", flag.ContinueOnError)
 	fs.Usage = func() { usageFor("install") }
 	unitDir := fs.String("unit-dir", install.DefaultUnitDir, "directory to install systemd unit files into")
-	configDir := fs.String("config-dir", install.DefaultConfigDir, "directory for per-instance .env files")
+	configDir := fs.String("config-dir", install.DefaultConfigDir, "directory for per-instance TOML config files")
 	if err := fs.Parse(args); err != nil {
 		if err == flag.ErrHelp {
 			os.Exit(0)
@@ -97,7 +99,13 @@ func installCmd(args []string) {
 		os.Exit(1)
 	}
 
-	if err := install.Run(install.Options{
+	if fs.NArg() != 1 {
+		fmt.Fprintf(os.Stderr, "install: instance name required\n\n")
+		usageFor("install")
+		os.Exit(1)
+	}
+
+	if err := install.InstallInstance(fs.Arg(0), install.Options{
 		UnitDir:   *unitDir,
 		ConfigDir: *configDir,
 	}); err != nil {
@@ -106,13 +114,31 @@ func installCmd(args []string) {
 	}
 }
 
-func printVersion() {
-	fmt.Printf("config-watch %s\n", version)
-	fmt.Printf("commit:    %s\n", commit)
-	fmt.Printf("built:     %s\n", date)
-	fmt.Printf("builtBy:   %s\n", builtBy)
-	fmt.Printf("go:        %s\n", runtime.Version())
-	fmt.Printf("os/arch:   %s/%s\n", runtime.GOOS, runtime.GOARCH)
+func uninstallCmd(args []string) {
+	fs := flag.NewFlagSet("uninstall", flag.ContinueOnError)
+	fs.Usage = func() { usageFor("uninstall") }
+	unitDir := fs.String("unit-dir", install.DefaultUnitDir, "directory the systemd unit files were installed into")
+	configDir := fs.String("config-dir", install.DefaultConfigDir, "directory the per-instance TOML config files live in")
+	if err := fs.Parse(args); err != nil {
+		if err == flag.ErrHelp {
+			os.Exit(0)
+		}
+		os.Exit(1)
+	}
+
+	if fs.NArg() != 1 {
+		fmt.Fprintf(os.Stderr, "uninstall: instance name required\n\n")
+		usageFor("uninstall")
+		os.Exit(1)
+	}
+
+	if err := install.UninstallInstance(fs.Arg(0), install.Options{
+		UnitDir:   *unitDir,
+		ConfigDir: *configDir,
+	}); err != nil {
+		fmt.Fprintln(os.Stderr, "config-watch:", err)
+		os.Exit(1)
+	}
 }
 
 func usage() {
@@ -123,7 +149,8 @@ Usage:
 
 Subcommands:
   run        Run one check-and-reload cycle (invoked by the systemd service)
-  install    Install the systemd templates and an example EnvironmentFile
+  install    Install the systemd templates and enable a timer instance
+  uninstall  Disable a timer instance and remove the template unit files
   version    Show version information (aliases: --version, -V)
   help       Show help for a subcommand
 
@@ -136,51 +163,72 @@ func usageFor(sub string) {
 	case "run":
 		fmt.Print(`config-watch run
 
-Hashes the watched file or directory. If the hash has changed since the
-last run, runs the check command; if that succeeds, runs the reload
-command and records the new hash.
+Hashes the watched file or directory named by --config's "path" field. If
+the hash has changed since the last run, runs check_cmd; if that succeeds,
+runs reload_cmd and records the new hash.
 
-Every setting can be given as a flag or an environment variable — this is
-what config-watch@<name>.service's EnvironmentFile normally supplies, but
-passing flags instead lets a watch be exercised manually. A flag wins over
-its environment variable when both are set.
+Passing --config with a path other than the installed
+<config-dir>/<instance>.toml lets a watch be exercised manually, with
+--state-dir pointed at a scratch directory, without a systemd instance.
 
 Usage:
-  config-watch run [flags]
+  config-watch run --config <path> [flags]
 
 Flags:
-      --path string         File or directory to watch (env: CONFIG_WATCH_PATH)
-      --check-cmd string    Must exit 0 for the reload to proceed (env: CONFIG_WATCH_CHECK_CMD)
-      --reload-cmd string   Run only if --check-cmd succeeds (env: CONFIG_WATCH_RELOAD_CMD)
-      --state-dir string    Where the content hash is stored (env: STATE_DIRECTORY,
-                             set automatically by systemd via StateDirectory=)
+  -c, --config string      Path to the instance's TOML config file (required)
+      --state-dir string   Where the content hash is stored (env: STATE_DIRECTORY,
+                            set automatically by systemd via StateDirectory=)
   -h, --help                Show this help
 `)
+
 	case "install":
 		fmt.Print(`config-watch install
 
 Writes the config-watch@.service, config-watch@.timer, and
-config-watch-failure@.service systemd template units, drops an example
-EnvironmentFile, and runs systemctl daemon-reload.
+config-watch-failure@.service systemd template units (only if their
+rendered content changed), reloads systemd, and enables+starts the named
+instance's timer. Creates <config-dir>/<instance>.toml with a sample
+config if it doesn't already exist.
 
 This does NOT copy or move the config-watch binary anywhere. Put the
 binary wherever you want it to live first (/usr/local/bin, /usr/local/sbin,
-...), then run "config-watch install" from that location — the installed
-units' ExecStart= is pointed at wherever this binary is currently running
-from.
+...), then run "config-watch install <instance>" from that location — the
+installed units' ExecStart= is pointed at wherever this binary is
+currently running from.
 
 Usage:
-  config-watch install [flags]
+  config-watch install <instance> [flags]
+
+Arguments:
+  <instance>     Instance name — enables config-watch@<instance>.timer
 
 Flags:
       --unit-dir     Directory to install systemd unit files into (default: ` + install.DefaultUnitDir + `)
-      --config-dir   Directory for per-instance .env files (default: ` + install.DefaultConfigDir + `)
+      --config-dir   Directory for per-instance TOML config files (default: ` + install.DefaultConfigDir + `)
   -h, --help         Show this help
 
-After installing, for each new instance <name>:
-  1. cp <config-dir>/example.env <config-dir>/<name>.env
-  2. edit that file
-  3. systemctl enable --now config-watch@<name>.timer
+After installing, edit <config-dir>/<instance>.toml to configure the
+watch, then the timer will pick it up on its next tick.
+`)
+	case "uninstall":
+		fmt.Print(`config-watch uninstall
+
+Disables and stops the named timer instance, then removes the shared
+template unit files and reloads the systemd daemon.
+
+The instance's config file (<config-dir>/<instance>.toml) and state
+directory are not removed.
+
+Usage:
+  config-watch uninstall <instance> [flags]
+
+Arguments:
+  <instance>     Instance name — disables config-watch@<instance>.timer
+
+Flags:
+      --unit-dir     Directory the systemd unit files were installed into (default: ` + install.DefaultUnitDir + `)
+      --config-dir   Directory the per-instance TOML config files live in (default: ` + install.DefaultConfigDir + `)
+  -h, --help         Show this help
 `)
 	case "version":
 		fmt.Print(`config-watch version

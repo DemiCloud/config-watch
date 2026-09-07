@@ -8,13 +8,13 @@ PREFIX  ?= /usr/local
 BINDIR  ?= $(PREFIX)/bin
 
 # Base linker flags (dev builds — version only)
-LDFLAGS := -X main.version=$(VERSION)
+LDFLAGS := -X github.com/demicloud/config-watch/internal/version.Version=$(VERSION)
 
 # Release linker flags (strip + trim + full metadata)
 RELEASE_LDFLAGS := $(LDFLAGS) -s -w \
-	-X main.commit=$(shell git rev-parse --short HEAD 2>/dev/null || echo "none") \
-	-X main.date=$(shell date -u +"%Y-%m-%dT%H:%M:%SZ") \
-	-X main.builtBy=$(BUILT_BY)
+	-X github.com/demicloud/config-watch/internal/version.Commit=$(shell git rev-parse --short HEAD 2>/dev/null || echo "none") \
+	-X github.com/demicloud/config-watch/internal/version.BuildDate=$(shell date -u +"%Y-%m-%dT%H:%M:%SZ") \
+	-X github.com/demicloud/config-watch/internal/version.BuiltBy=$(BUILT_BY)
 
 # Target platforms for `make release`
 PLATFORMS := linux/amd64 linux/arm64
